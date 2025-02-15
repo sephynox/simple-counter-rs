@@ -13,7 +13,7 @@ hardware devices from ideation to production.
 
 ## Circuit Diagram
 
-![Circuit Diagram](docs/images/circuit_diagram.png)
+![Circuit Diagram](docs/images/circuit_diagram-removebg.png)
 
 ## Breadboard Design
 
@@ -21,7 +21,8 @@ hardware devices from ideation to production.
 
 ## PCB Design
 
-![PCB Design](docs/images/circuitboard.png)
+![PCB Design Front](docs/images/circuitboard-front.png)
+![PCB Design Back](docs/images/circuitboard-back.png)
 
 ## Case Design
 
