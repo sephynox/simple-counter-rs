@@ -1,0 +1,4 @@
+(sym_lib_table
+  (version 7)
+  (lib (name "conn_01x05_pin_power")(type "KiCad")(uri "/home/twahid/Documents/projects/kicad-symbols/Connectors/conn_01x05_pin_power.kicad_sym")(options "")(descr ""))
+)

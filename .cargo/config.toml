@@ -1,0 +1,13 @@
+
+[build]
+target = "avr-unknown-gnu-atmega328"
+
+[unstable]
+build-std = ["core"]
+build-std-features = ["panic_immediate_abort"]
+
+[target.avr-unknown-gnu-atmega328]
+runner = "simavr"
+
+[env]
+AVR_CPU_FREQUENCY_HZ = "16000000"

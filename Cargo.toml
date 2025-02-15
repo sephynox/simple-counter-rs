@@ -1,0 +1,32 @@
+[package]
+name = "simple-counter-rs"
+edition = "2021"
+version = "0.1.0"
+
+[lib]
+path = "src/lib.rs"
+name = "simple_counter_rs"
+edition = "2021"
+crate-type = ["staticlib"]
+test = false     # Disable tests
+doctest = false  # Disable doc tests
+
+[profile.dev]
+opt-level = "s"    # Optimize for size
+lto = true         # Enable link-time optimization
+codegen-units = 1  # Reduce code size
+panic = "abort"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[profile.test]
+panic = "abort"
+
+[dependencies.avr-device]
+version = "0.7.0"
+default-features = false
+features = ["atmega328p", "critical-section-impl"]

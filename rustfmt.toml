@@ -1,0 +1,8 @@
+# Use spaces instead of tabs
+hard_tabs = true
+# Set tab width to 4 spaces
+tab_spaces = 4
+# Set max line width (default is 100)
+max_width = 80
+# Allow up to 120 chars for certain cases
+chain_width = 120

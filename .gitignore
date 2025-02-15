@@ -1,0 +1,6 @@
+.pio
+.vscode/
+/schematic/*-backups/
+/schematic/*.lck
+/schematic/fp-info-cache
+/target/
