@@ -3,4 +3,5 @@
 /schematic/*-backups/
 /schematic/*.lck
 /schematic/fp-info-cache
+/schematic/gerber/*.zip
 /target/

@@ -37,9 +37,9 @@
         "other_text_thickness": 0.15,
         "other_text_upright": false,
         "pads": {
-          "drill": 1.0,
-          "height": 1.6,
-          "width": 1.6
+          "drill": 1.016,
+          "height": 1.7272,
+          "width": 1.7272
         },
         "silk_line_width": 0.1,
         "silk_text_italic": false,
@@ -58,7 +58,9 @@
           "width": 0.0
         }
       ],
-      "drc_exclusions": [],
+      "drc_exclusions": [
+        "extra_footprint|167640000|73025000|71f84dee-b699-43a1-ae87-46e16f8c74a8|00000000-0000-0000-0000-000000000000"
+      ],
       "meta": {
         "version": 2
       },
@@ -538,7 +540,7 @@
       "gencad": "",
       "idf": "",
       "netlist": "",
-      "plot": "",
+      "plot": "gerber/",
       "pos_files": "",
       "specctra_dsn": "",
       "step": "",
