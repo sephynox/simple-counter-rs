@@ -2,21 +2,60 @@
 #![feature(abi_avr_interrupt)]
 #![cfg_attr(test, no_main)]
 #![feature(custom_test_frameworks)]
-#![test_runner(crate::test_runner)]
+#![test_runner(defmt_test::run_tests)]
 
-// Dummy test runner to prevent warnings
+use core::fmt::Write;
+
+use avr_device::interrupt::Mutex;
+use log::Level;
+#[cfg(target_has_atomic = "ptr")]
+use log::LevelFilter;
+use log::{Metadata, Record};
+
+// Test configuration
 #[cfg(test)]
-fn test_runner(_tests: &[&dyn Fn()]) {}
+use defmt_test as _;
 
-// Only include this panic handler when not testing
-#[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
+// Test entry point
+#[cfg(test)]
+#[no_mangle]
+pub extern "C" fn main() -> ! {
 	loop {}
 }
 
-use core::panic::PanicInfo;
+// Test panic handler
+#[cfg(test)]
+#[panic_handler]
+fn panic(info: &core::panic::PanicInfo) -> ! {
+	defmt::error!("{}", defmt::Display2Format(info));
+	exit_qemu();
+	loop {}
+}
 
-use avr_device::interrupt::Mutex;
+// Non-test panic handler
+#[cfg(not(test))]
+#[panic_handler]
+fn panic(_info: &core::panic::PanicInfo) -> ! {
+	loop {}
+}
+
+#[cfg(test)]
+fn exit_qemu() {
+	use core::ptr;
+	let exit_address: *mut u32 = 0x4000_0000u32 as *mut u32;
+	unsafe {
+		ptr::write_volatile(exit_address, 0);
+	}
+}
+
+/// Determine if we're in debug mode based on compiler flags
+#[cfg(debug_assertions)]
+pub const DEBUG_MODE: bool = true;
+#[cfg(not(debug_assertions))]
+pub const DEBUG_MODE: bool = false;
+
+/// Logger implementation for Arduino
+static LOGGER: ArduinoLogger = ArduinoLogger;
 
 // Arduino to 74HC595 Connections
 
@@ -61,6 +100,27 @@ const DIGIT_SELECT: [u8; 4] = [
 	0b00001000, // Q3: Leftmost digit   (#4)
 ];
 
+/// Initializes the logger for logging messages.
+#[cfg(target_has_atomic = "ptr")]
+pub fn init_logger() {
+	log::set_logger(&LOGGER)
+		.map(|()| {
+			log::set_max_level(if DEBUG_MODE {
+				LevelFilter::Debug
+			} else {
+				LevelFilter::Info
+			})
+		})
+		.expect("Failed to initialize logger");
+}
+
+#[cfg(not(target_has_atomic = "ptr"))]
+pub fn init_logger() {
+	unsafe {
+		log::set_logger_racy(&LOGGER).expect("Failed to initialize logger");
+	}
+}
+
 /// Adds decimal point to a digit pattern by setting the DP bit to 0.
 ///
 /// The DP (decimal point) is the MSB in our pattern, so we clear it
@@ -70,6 +130,39 @@ const DIGIT_SELECT: [u8; 4] = [
 fn with_decimal(pattern: u8) -> u8 {
 	// Clear the MSB (DP segment) to turn it on (0 = ON for common anode)
 	pattern & 0b01111111
+}
+
+/// Shifts out 8 bits of data to a shift register using bit-banging.
+///
+/// # Parameters
+/// - data_pin: Pin connected to shift register's SER (serial data input)
+/// - clock_pin: Pin connected to shift register's SRCLK (shift register clock)
+/// - bit_order: 1 for MSBFIRST, 0 for LSBFIRST
+/// - value: 8-bit value to shift out
+fn shift_out(data_pin: u8, clock_pin: u8, bit_order: u8, mut value: u8) {
+	unsafe {
+		for _ in 0..8 {
+			// Step 1: Extract next bit based on bit_order
+			let bit = if bit_order == 1 {
+				// MSB first: extract leftmost bit (0x80 = 0b10000000)
+				let b = (value & 0x80) != 0;
+				value <<= 1; // Shift left to get next bit ready
+				b
+			} else {
+				// LSB first: extract rightmost bit (0x01 = 0b00000001)
+				let b = (value & 1) != 0;
+				value >>= 1; // Shift right to get next bit ready
+				b
+			};
+
+			// Step 2: Set data pin to current bit value
+			arduino_digital_write(data_pin, bit as u8);
+
+			// Step 3: Pulse clock pin
+			arduino_digital_write(clock_pin, 1); // Rising edge
+			arduino_digital_write(clock_pin, 0); // Falling edge (data shifts in)
+		}
+	}
 }
 
 /// Global counter instance protected by Mutex for safe access from interrupts.
@@ -214,6 +307,8 @@ impl Display {
 		let (value, last_update) =
 			self.update_counter(current_time, self.last_update, self.value);
 
+		log::debug!("Counter value incremented: {}", value);
+
 		self.value = value;
 		self.last_update = last_update;
 
@@ -224,37 +319,81 @@ impl Display {
 
 impl Counter for Display {}
 
-/// Shifts out 8 bits of data to a shift register using bit-banging.
-///
-/// # Parameters
-/// - data_pin: Pin connected to shift register's SER (serial data input)
-/// - clock_pin: Pin connected to shift register's SRCLK (shift register clock)
-/// - bit_order: 1 for MSBFIRST, 0 for LSBFIRST
-/// - value: 8-bit value to shift out
-fn shift_out(data_pin: u8, clock_pin: u8, bit_order: u8, mut value: u8) {
-	unsafe {
-		for _ in 0..8 {
-			// Step 1: Extract next bit based on bit_order
-			let bit = if bit_order == 1 {
-				// MSB first: extract leftmost bit (0x80 = 0b10000000)
-				let b = (value & 0x80) != 0;
-				value <<= 1; // Shift left to get next bit ready
-				b
-			} else {
-				// LSB first: extract rightmost bit (0x01 = 0b00000001)
-				let b = (value & 1) != 0;
-				value >>= 1; // Shift right to get next bit ready
-				b
-			};
+// Add this helper struct for writing to a byte buffer
+struct BufferWriter<'a> {
+	buffer: &'a mut [u8],
+	pos: usize,
+}
 
-			// Step 2: Set data pin to current bit value
-			arduino_digital_write(data_pin, bit as u8);
+impl<'a> BufferWriter<'a> {
+	fn new(buffer: &'a mut [u8]) -> Self {
+		BufferWriter { buffer, pos: 0 }
+	}
+}
 
-			// Step 3: Pulse clock pin
-			arduino_digital_write(clock_pin, 1); // Rising edge
-			arduino_digital_write(clock_pin, 0); // Falling edge (data shifts in)
+impl<'a> core::fmt::Write for BufferWriter<'a> {
+	fn write_str(&mut self, s: &str) -> core::fmt::Result {
+		let remaining = self.buffer.len() - self.pos;
+		let bytes = s.as_bytes();
+		let len = bytes.len().min(remaining);
+
+		if len > 0 {
+			self.buffer[self.pos..self.pos + len]
+				.copy_from_slice(&bytes[..len]);
+			self.pos += len;
+		}
+		Ok(())
+	}
+}
+
+/// Logger implementation for Arduino
+struct ArduinoLogger;
+
+impl log::Log for ArduinoLogger {
+	/// Check if a log message with the specified metadata would be logged
+	fn enabled(&self, metadata: &Metadata) -> bool {
+		if DEBUG_MODE {
+			metadata.level() <= Level::Debug
+		} else {
+			metadata.level() <= Level::Info
 		}
 	}
+
+	/// Log a message with the specified level
+	fn log(&self, record: &Record) {
+		if self.enabled(record.metadata()) {
+			// Convert log level to u8
+			let level = match record.level() {
+				Level::Error => 0,
+				Level::Warn => 1,
+				Level::Info => 2,
+				Level::Debug => 3,
+				Level::Trace => 4,
+			};
+
+			// Create a buffer to hold the message
+			let mut buffer = [0u8; 128];
+			// Use write_str to format the message
+			let _ = core::write!(
+				BufferWriter::new(&mut buffer),
+				"{}",
+				record.args()
+			);
+
+			// Ensure null termination
+			if let Some(null_pos) = buffer.iter().position(|&x| x == 0) {
+				buffer[null_pos] = b'\0';
+			} else {
+				buffer[buffer.len() - 1] = b'\0';
+			}
+
+			unsafe {
+				debug_println(level, buffer.as_ptr());
+			}
+		}
+	}
+
+	fn flush(&self) {}
 }
 
 /// Arduino setup function - called once at startup.
@@ -262,12 +401,18 @@ fn shift_out(data_pin: u8, clock_pin: u8, bit_order: u8, mut value: u8) {
 /// Configures pin modes and initializes serial communication
 #[no_mangle]
 extern "C" fn arduino_setup() {
+	// Initialize the logger
+	init_logger();
+
+	log::info!("Arduino beginning setup...");
+
 	unsafe {
 		arduino_pin_mode(LATCH_DIO, 1); // Set LATCH pin as OUTPUT
 		arduino_pin_mode(CLK_DIO, 1); // Set CLOCK pin as OUTPUT
 		arduino_pin_mode(DATA_DIO, 1); // Set DATA pin as OUTPUT
-		arduino_serial_begin(9600); // Initialize serial at 9600 baud
 	}
+
+	log::info!("Arduino setup complete!");
 }
 
 /// Arduino main loop function - called repeatedly.
@@ -288,15 +433,72 @@ extern "C" fn arduino_loop() {
 // External Arduino C functions we call from Rust
 // These map directly to Arduino's C++ functions
 extern "C" {
+	/// Prints debug message with level and timestamp
+	fn debug_println(level: u8, msg: *const u8);
 	/// Sets digital pin output value (HIGH=1, LOW=0)
 	fn arduino_digital_write(pin: u8, value: u8);
 	/// Configures pin mode (OUTPUT=1, INPUT=0)
 	fn arduino_pin_mode(pin: u8, mode: u8);
 	/// Returns milliseconds since program start
 	fn arduino_millis() -> u32;
-	/// Initializes serial communication at specified baud rate
-	fn arduino_serial_begin(baud: u32);
-	/// Prints value to serial monitor with newline
-	#[allow(dead_code)]
-	fn arduino_serial_println(value: u32);
+}
+
+// TODO Test issues in no_std
+// https://github.com/sephynox/simple-counter-rs/issues/1
+#[cfg(test)]
+mod tests {
+	#[test]
+	fn test_arduino_logger_enabled() {
+		let logger = ArduinoLogger;
+
+		// Test with DEBUG_MODE true
+		let metadata =
+			Metadata::builder().level(Level::Debug).target("test").build();
+		assert!(logger.enabled(&metadata));
+
+		// Test with higher level than allowed
+		let metadata =
+			Metadata::builder().level(Level::Trace).target("test").build();
+		assert!(!logger.enabled(&metadata));
+	}
+
+	#[test]
+	fn test_arduino_logger_log() {
+		let logger = ArduinoLogger;
+
+		// Test each log level with a simple &str
+		let levels = [
+			(Level::Error, 0),
+			(Level::Warn, 1),
+			(Level::Info, 2),
+			(Level::Debug, 3),
+		];
+
+		for (level, expected_level) in levels {
+			let args = format_args!("Test message");
+			let record = Record::builder()
+				.level(level)
+				.target("test")
+				.line(Some(0))
+				.file(Some("test"))
+				.module_path(Some("test"))
+				.args(args)
+				.build();
+
+			logger.log(&record);
+		}
+	}
+
+	#[test]
+	fn test_message_truncation() {
+		let logger = ArduinoLogger;
+		// Create a very long message that exceeds buffer size
+		let record = Record::builder()
+			.args(format_args!("{}", "x".repeat(128)))
+			.level(Level::Info)
+			.target("test")
+			.build();
+
+		logger.log(&record);
+	}
 }
