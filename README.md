@@ -24,13 +24,18 @@ hardware devices from ideation to production.
 ![PCB Design Front](docs/images/circuitboard-front.png)
 ![PCB Design Back](docs/images/circuitboard-back.png)
 
+# PCB Assembled
+
+![PCB Assembled](docs/images/pcb_assembled.jpeg)
+
 ## Case Design
 
-TODO
+![Case Design](docs/images/sketch_clean.png)
+![Case Design](docs/images/3d_case.png)
 
 ## Hardware Setup
 
-- Arduino Uno
+- Arduino Uno R3
 - 2x 74HC595 shift registers
 - 4-digit 7-segment display (common cathode)
 - 2x Ceramic capacitors (100nF)
