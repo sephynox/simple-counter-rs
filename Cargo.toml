@@ -8,13 +8,14 @@ path = "src/lib.rs"
 name = "simple_counter_rs"
 edition = "2021"
 crate-type = ["staticlib"]
-test = false     # Disable tests
-doctest = false  # Disable doc tests
+test = true
+harness = false
+doctest = false
 
 [profile.dev]
-opt-level = "s"    # Optimize for size
-lto = true         # Enable link-time optimization
-codegen-units = 1  # Reduce code size
+opt-level = "s"
+lto = true
+codegen-units = 1
 panic = "abort"
 
 [profile.release]
@@ -24,9 +25,33 @@ codegen-units = 1
 panic = "abort"
 
 [profile.test]
-panic = "abort"
+opt-level = "s"
+debug = true
+debug-assertions = true
+overflow-checks = true
+lto = true
+codegen-units = 1
+
+[features]
+default = ["defmt-default"]
+defmt-default = []
+defmt-trace = []
+defmt-debug = []
+defmt-info = []
+defmt-warn = []
+defmt-error = []
 
 [dependencies.avr-device]
 version = "0.7.0"
 default-features = false
 features = ["atmega328p", "critical-section-impl"]
+
+[dependencies.log]
+version = "0.4.26"
+default-features = false
+
+[dependencies.defmt]
+version = "0.3.10"
+
+[dev-dependencies]
+defmt-test = "0.3.3"

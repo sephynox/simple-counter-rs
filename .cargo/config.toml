@@ -1,4 +1,3 @@
-
 [build]
 target = "avr-unknown-gnu-atmega328"
 
@@ -6,8 +5,20 @@ target = "avr-unknown-gnu-atmega328"
 build-std = ["core"]
 build-std-features = ["panic_immediate_abort"]
 
-[target.avr-unknown-gnu-atmega328]
-runner = "simavr"
+[target.'cfg(not(test))']
+rustflags = [
+    "-C",
+    "opt-level=s",
+    "-C",
+    "lto=true",
+    "-C",
+    "codegen-units=1",
+    "-C",
+    "panic=abort",
+]
+
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "panic=abort"]
 
 [env]
 AVR_CPU_FREQUENCY_HZ = "16000000"
